@@ -1,343 +1,231 @@
-import { useState, useEffect, useRef } from 'react';
-import { Download, Palette, Type, Settings, Image as ImageIcon, Circle, Square } from 'lucide-react';
+import { useState } from 'react';
+import { AvatarCanvas } from './AvatarCanvas';
+import { Theme } from './avatar-renderer';
+import { 
+  Palette, 
+  Layers, 
+  Diamond, 
+  Dices, 
+  RefreshCw,
+  Send,
+  MessageSquare
+} from 'lucide-react';
+import clsx from 'clsx';
 
-const themes = [
-  { id: 'ton-blue', name: '💎 TON Blue', bg1: '#3b82f6', bg2: '#4f46e5', textColor: '#ffffff', glassColor: 'rgba(255,255,255,0.12)' },
-  { id: 'dark-mesh', name: '🌑 Dark Mesh', bg1: '#0f172a', bg2: '#27272a', textColor: '#ffffff', glassColor: 'rgba(255,255,255,0.06)' },
-  { id: 'neon-cyber', name: '💜 Neon Cyber', bg1: '#c026d3', bg2: '#4c1d95', textColor: '#fdf4ff', glassColor: 'rgba(192,38,211,0.12)' },
-  { id: 'holographic', name: '🌈 Holographic', bg1: '#f9a8d4', bg2: '#818cf8', textColor: '#1e1b4b', glassColor: 'rgba(255,255,255,0.35)' },
-  { id: 'deep-space', name: '🚀 Deep Space', bg1: '#020617', bg2: '#1e1b4b', textColor: '#f3e8ff', glassColor: 'rgba(88,28,135,0.22)' },
-  { id: 'minimal-light', name: '⬜ Minimal Light', bg1: '#f4f4f5', bg2: '#d4d4d8', textColor: '#18181b', glassColor: 'rgba(255,255,255,0.65)' },
-  { id: 'matrix-web3', name: '🟢 Matrix Web3', bg1: '#022c22', bg2: '#064e3b', textColor: '#34d399', glassColor: 'rgba(6,78,59,0.22)' },
-  { id: 'molten-gold', name: '🥇 Molten Gold', bg1: '#f59e0b', bg2: '#ea580c', textColor: '#451a03', glassColor: 'rgba(255,255,255,0.22)' },
+const themes: { id: Theme; label: string; icon: string }[] = [
+  { id: 'midnight', label: 'Midnight', icon: '🌑' },
+  { id: 'opal', label: 'Opal', icon: '⚪' },
+  { id: 'nordic', label: 'Nordic', icon: '❄️' },
+  { id: 'sunset', label: 'Sunset', icon: '🌇' },
+  { id: 'ton-clean', label: 'TON Blue', icon: '💎' },
 ];
 
-function drawTonLogo(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = r * 0.12;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+export default function App() {
+  const [name, setName] = useState('ignat.ton');
+  const [theme, setTheme] = useState<Theme>('midnight');
+  const [glass, setGlass] = useState(true);
+  const [logo, setLogo] = useState(true);
+  const [inputVal, setInputVal] = useState('');
 
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.stroke();
-
-  const hw = r * 0.55;
-  const topY = cy - r * 0.35;
-  const botY = cy + r * 0.48;
-  const midY = cy + r * 0.10;
-
-  ctx.beginPath();
-  ctx.moveTo(cx - hw, topY);
-  ctx.lineTo(cx + hw, topY);
-  ctx.lineTo(cx, botY);
-  ctx.closePath();
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(cx, topY);
-  ctx.lineTo(cx, midY);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function App() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  const [name, setName] = useState('my.ton');
-  const [themeId, setThemeId] = useState('ton-blue');
-  const [glassmorphism, setGlassmorphism] = useState(true);
-  const [showLogo, setShowLogo] = useState(true);
-  const [rounded, setRounded] = useState<'circle' | 'rounded' | 'square'>('circle');
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const SIZE = 1024;
-    canvas.width = SIZE;
-    canvas.height = SIZE;
-
-    const theme = themes.find(t => t.id === themeId) || themes[0];
-
-    // White background to avoid black background issues in Telegram when saved with transparency
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, SIZE, SIZE);
-
-    const grad = ctx.createLinearGradient(0, 0, SIZE, SIZE);
-    grad.addColorStop(0, theme.bg1);
-    grad.addColorStop(1, theme.bg2);
-
-    const br = rounded === 'circle' ? SIZE / 2 : rounded === 'rounded' ? SIZE * 0.18 : 0;
-    
-    // Draw base shape
-    ctx.beginPath();
-    if (br > 0) {
-      ctx.roundRect(0, 0, SIZE, SIZE, br);
-    } else {
-      ctx.rect(0, 0, SIZE, SIZE);
-    }
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // Clip for inner elements
-    ctx.save();
-    ctx.beginPath();
-    if (br > 0) {
-      ctx.roundRect(0, 0, SIZE, SIZE, br);
-    } else {
-      ctx.rect(0, 0, SIZE, SIZE);
-    }
-    ctx.clip();
-    
-    // Ambient glows
-    const glowGrad1 = ctx.createRadialGradient(SIZE * 0.8, SIZE * 0.1, 0, SIZE * 0.8, SIZE * 0.1, SIZE * 0.5);
-    glowGrad1.addColorStop(0, 'rgba(255,255,255,0.15)');
-    glowGrad1.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = glowGrad1;
-    ctx.fillRect(0, 0, SIZE, SIZE);
-
-    const glowGrad2 = ctx.createRadialGradient(SIZE * 0.1, SIZE * 0.9, 0, SIZE * 0.1, SIZE * 0.9, SIZE * 0.6);
-    glowGrad2.addColorStop(0, 'rgba(0,0,0,0.18)');
-    glowGrad2.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = glowGrad2;
-    ctx.fillRect(0, 0, SIZE, SIZE);
-    ctx.restore();
-
-    const cardSize = SIZE * 0.6;
-    const cardX = (SIZE - cardSize) / 2;
-    const cardY = (SIZE - cardSize) / 2;
-    const cardR = SIZE * 0.08;
-
-    if (glassmorphism) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(cardX, cardY, cardSize, cardSize, cardR);
-      ctx.fillStyle = theme.glassColor;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (showLogo) {
-      const logoCX = SIZE / 2;
-      const logoCY = cardY + cardSize * 0.22;
-      const logoR = cardSize * 0.13;
-      drawTonLogo(ctx, logoCX, logoCY, logoR, theme.textColor);
-    }
-
-    const initials = name.replace(/\.ton$/i, '').substring(0, 2).toUpperCase() || 'TN';
-    const fontSize = initials.length > 1 ? SIZE * 0.26 : SIZE * 0.32;
-    ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
-    ctx.fillStyle = theme.textColor;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.25)';
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 8;
-    ctx.fillText(initials, SIZE / 2, SIZE / 2 + SIZE * 0.02);
-    
-    // Reset shadow for next texts
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-
-    const displayName = name || 'TON Domain';
-    const nameFontSize = SIZE * 0.048;
-    ctx.font = `600 ${nameFontSize}px system-ui, -apple-system, sans-serif`;
-    ctx.fillStyle = theme.textColor;
-    ctx.globalAlpha = 0.8;
-    ctx.fillText(displayName.toUpperCase(), SIZE / 2, cardY + cardSize - SIZE * 0.065);
-    ctx.globalAlpha = 1;
-
-  }, [name, themeId, glassmorphism, showLogo, rounded]);
-
-  const downloadAvatar = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    // Save as JPEG to fix the black background issue in Telegram when transparent
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    const link = document.createElement('a');
-    link.download = `avatar-${name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.jpg`;
-    link.href = dataUrl;
-    link.click();
+  const handleRandomize = () => {
+    const randomTheme = themes[Math.floor(Math.random() * themes.length)].id;
+    setTheme(randomTheme);
+    setGlass(Math.random() > 0.5);
+    setLogo(Math.random() > 0.5);
   };
 
+  const currentThemeData = themes.find(t => t.id === theme);
+
   return (
-    <div className="min-h-screen bg-neutral-900 text-neutral-100 p-4 md:p-8 font-sans">
-      <div className="max-w-5xl mx-auto">
-        <header className="mb-8 text-center md:text-left">
-          <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent inline-flex items-center gap-3">
-            <ImageIcon className="w-8 h-8 text-blue-400" />
-            TON Avatar Generator
-          </h1>
-          <p className="text-neutral-400 mt-2">
-            Create stunning, customized avatars with solid backgrounds (Fixes Telegram black background bug).
-          </p>
-        </header>
+    <div className="min-h-screen bg-[#0e1621] text-white font-sans flex items-center justify-center p-4 selection:bg-[#2b5278]">
+      {/* Phone Mockup / Telegram Chat Container */}
+      <div className="w-full max-w-md bg-[#17212b] rounded-[2rem] shadow-2xl overflow-hidden border border-white/5 flex flex-col h-[85vh] relative">
+        
+        {/* Header */}
+        <div className="bg-[#17212b] px-4 py-3 flex items-center gap-3 border-b border-black/20 z-10 shadow-sm">
+          <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-xl">
+            💎
+          </div>
+          <div>
+            <h1 className="font-semibold text-[15px] leading-tight text-[#f5f5f5]">TON Avatar Bot</h1>
+            <p className="text-[#8a9aa9] text-[13px]">bot</p>
+          </div>
+        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Controls */}
-          <div className="lg:col-span-7 space-y-6">
+        {/* Chat Area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20 custom-scrollbar relative"
+             style={{ 
+               backgroundImage: "url('https://www.transparenttextures.com/patterns/cubes.png')", 
+               backgroundColor: "#0e1621" 
+             }}>
+             
+          <div className="flex flex-col items-center justify-center text-center mt-4 mb-6">
+            <span className="bg-[#2b5278]/40 text-[#8a9aa9] text-xs px-3 py-1 rounded-full backdrop-blur-sm">
+              Today
+            </span>
+          </div>
+
+          {/* Bot Message Block */}
+          <div className="flex gap-2 w-full max-w-[320px] mx-auto group">
+            <div className="w-8 h-8 rounded-full bg-blue-500 flex-shrink-0 flex items-center justify-center text-sm shadow-sm">
+              💎
+            </div>
             
-            <div className="bg-neutral-800 border border-neutral-700 rounded-2xl p-6">
-              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                <Type className="w-5 h-5 text-indigo-400" />
-                Text Settings
-              </h2>
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-2">Display Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                  placeholder="my.ton"
-                  maxLength={15}
-                />
-              </div>
-            </div>
-
-            <div className="bg-neutral-800 border border-neutral-700 rounded-2xl p-6">
-              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                <Palette className="w-5 h-5 text-pink-400" />
-                Theme Selection
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {themes.map(theme => (
-                  <button
-                    key={theme.id}
-                    onClick={() => setThemeId(theme.id)}
-                    className={`flex items-center px-4 py-3 rounded-xl border text-left transition-all ${
-                      themeId === theme.id 
-                        ? 'border-blue-500 bg-blue-500/10' 
-                        : 'border-neutral-700 bg-neutral-900 hover:border-neutral-500'
-                    }`}
-                  >
-                    <div 
-                      className="w-6 h-6 rounded-full mr-3 shadow-inner"
-                      style={{ background: `linear-gradient(135deg, ${theme.bg1}, ${theme.bg2})` }}
-                    />
-                    <span className="font-medium text-sm">{theme.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-neutral-800 border border-neutral-700 rounded-2xl p-6">
-              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                <Settings className="w-5 h-5 text-green-400" />
-                Shape & Features
-              </h2>
-              
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-3">Avatar Shape</label>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setRounded('circle')}
-                      className={`flex-1 flex flex-col items-center gap-2 py-3 rounded-xl border transition-all ${
-                        rounded === 'circle' ? 'border-blue-500 bg-blue-500/10 text-blue-400' : 'border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-500'
-                      }`}
-                    >
-                      <Circle className="w-6 h-6" />
-                      <span className="text-sm">Circle</span>
-                    </button>
-                    <button
-                      onClick={() => setRounded('rounded')}
-                      className={`flex-1 flex flex-col items-center gap-2 py-3 rounded-xl border transition-all ${
-                        rounded === 'rounded' ? 'border-blue-500 bg-blue-500/10 text-blue-400' : 'border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-500'
-                      }`}
-                    >
-                      <Square className="w-6 h-6" style={{ borderRadius: '4px' }} />
-                      <span className="text-sm">Rounded</span>
-                    </button>
-                    <button
-                      onClick={() => setRounded('square')}
-                      className={`flex-1 flex flex-col items-center gap-2 py-3 rounded-xl border transition-all ${
-                        rounded === 'square' ? 'border-blue-500 bg-blue-500/10 text-blue-400' : 'border-neutral-700 bg-neutral-900 text-neutral-400 hover:border-neutral-500'
-                      }`}
-                    >
-                      <Square className="w-6 h-6" />
-                      <span className="text-sm">Square</span>
-                    </button>
+            <div className="flex flex-col gap-1 w-full">
+              {/* Main Message Bubble */}
+              <div className="bg-[#182533] p-1.5 rounded-2xl rounded-tl-sm shadow-md overflow-hidden flex flex-col">
+                <div className="relative group/canvas">
+                  <AvatarCanvas 
+                    name={name} 
+                    theme={theme} 
+                    glass={glass} 
+                    logo={logo}
+                    className="w-full aspect-square transition-transform duration-300"
+                  />
+                  <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-md px-2 py-1 rounded-md text-[10px] text-white/80 font-medium opacity-0 group-hover/canvas:opacity-100 transition-opacity pointer-events-none">
+                    1200x1200px PNG
                   </div>
                 </div>
-
-                <div className="flex items-center justify-between p-4 bg-neutral-900 rounded-xl border border-neutral-700">
-                  <div>
-                    <h3 className="font-medium">Glassmorphism Card</h3>
-                    <p className="text-sm text-neutral-400">Add a frosted glass effect</p>
+                
+                <div className="px-3 py-2 text-[14px] text-[#f5f5f5] leading-relaxed">
+                  Вот твоя новая минималистичная аватарка! 🎨<br/>
+                  Используй кнопки ниже для настройки.
+                  <div className="text-right text-[#687c8e] text-[11px] mt-1">
+                    14:20
                   </div>
+                </div>
+              </div>
+
+              {/* Inline Buttons */}
+              <div className="flex flex-col gap-1 w-full mt-1">
+                {/* Row 1 */}
+                <div className="flex gap-1">
                   <button 
-                    onClick={() => setGlassmorphism(!glassmorphism)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${glassmorphism ? 'bg-blue-500' : 'bg-neutral-600'}`}
+                    onClick={() => {
+                      const idx = themes.findIndex(t => t.id === theme);
+                      const next = themes[(idx + 1) % themes.length];
+                      setTheme(next.id);
+                    }}
+                    className="flex-1 bg-[#1c2834] hover:bg-[#202e3d] active:bg-[#2b3c4e] transition-colors py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-medium text-[#f5f5f5] shadow-sm border border-white/[0.02]"
                   >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${glassmorphism ? 'translate-x-6' : 'translate-x-1'}`} />
+                    <Palette className="w-4 h-4 text-[#38bdf8]" />
+                    <span>{currentThemeData?.icon} {currentThemeData?.label}</span>
                   </button>
-                </div>
-
-                <div className="flex items-center justify-between p-4 bg-neutral-900 rounded-xl border border-neutral-700">
-                  <div>
-                    <h3 className="font-medium">TON Logo</h3>
-                    <p className="text-sm text-neutral-400">Show logo at the top</p>
-                  </div>
                   <button 
-                    onClick={() => setShowLogo(!showLogo)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${showLogo ? 'bg-blue-500' : 'bg-neutral-600'}`}
+                    onClick={handleRandomize}
+                    className="flex-none bg-[#1c2834] hover:bg-[#202e3d] active:bg-[#2b3c4e] transition-colors py-2.5 px-4 rounded-xl flex items-center justify-center text-[14px] font-medium text-[#f5f5f5] shadow-sm border border-white/[0.02]"
                   >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${showLogo ? 'translate-x-6' : 'translate-x-1'}`} />
+                    <Dices className="w-4 h-4 text-[#a78bfa]" />
                   </button>
                 </div>
-              </div>
-            </div>
+                
+                {/* Row 2 */}
+                <div className="flex gap-1">
+                  <button 
+                    onClick={() => setGlass(!glass)}
+                    className={clsx(
+                      "flex-1 transition-colors py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-medium shadow-sm border border-white/[0.02]",
+                      glass 
+                        ? "bg-[#2b5278]/30 text-[#38bdf8]" 
+                        : "bg-[#1c2834] text-[#8a9aa9] hover:bg-[#202e3d]"
+                    )}
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span>Glass: {glass ? 'ON' : 'OFF'}</span>
+                  </button>
+                  <button 
+                    onClick={() => setLogo(!logo)}
+                    className={clsx(
+                      "flex-1 transition-colors py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-medium shadow-sm border border-white/[0.02]",
+                      logo 
+                        ? "bg-[#2b5278]/30 text-[#38bdf8]" 
+                        : "bg-[#1c2834] text-[#8a9aa9] hover:bg-[#202e3d]"
+                    )}
+                  >
+                    <Diamond className="w-4 h-4" />
+                    <span>Logo: {logo ? 'ON' : 'OFF'}</span>
+                  </button>
+                </div>
 
-          </div>
-
-          {/* Preview */}
-          <div className="lg:col-span-5">
-            <div className="sticky top-8 bg-neutral-800 border border-neutral-700 rounded-3xl p-6 flex flex-col items-center shadow-2xl">
-              <h2 className="text-lg font-semibold mb-6 text-neutral-300 w-full text-center border-b border-neutral-700 pb-4">
-                Live Preview
-              </h2>
-              
-              <div className={`relative w-64 h-64 md:w-80 md:h-80 shadow-2xl transition-all duration-300 ${
-                rounded === 'circle' ? 'rounded-full' : rounded === 'rounded' ? 'rounded-3xl' : 'rounded-none'
-              } overflow-hidden bg-white flex items-center justify-center`}>
-                <canvas 
-                  ref={canvasRef} 
-                  className="w-full h-full object-contain"
-                />
-              </div>
-              
-              <div className="w-full mt-8">
-                <button
-                  onClick={downloadAvatar}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-4 px-6 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-blue-500/20"
+                {/* Row 3 */}
+                <button 
+                  onClick={() => {
+                    // Trigger a tiny animation or log
+                    const nextTheme = themes.find(t => t.id === theme) || themes[0];
+                    console.log('Regenerating...', { name, theme: nextTheme.label, glass, logo });
+                  }}
+                  className="w-full bg-[#1c2834] hover:bg-[#202e3d] active:bg-[#2b3c4e] transition-colors py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-medium text-[#f5f5f5] shadow-sm border border-white/[0.02]"
                 >
-                  <Download className="w-5 h-5" />
-                  Download Avatar (JPEG)
+                  <RefreshCw className="w-4 h-4 text-[#4ade80]" />
+                  <span>Перегенерировать</span>
                 </button>
-                <p className="text-xs text-center text-neutral-500 mt-4 px-4">
-                  Image is saved as JPEG with a solid white background to prevent black backgrounds in Telegram.
-                </p>
               </div>
+
             </div>
           </div>
-          
+        </div>
+
+        {/* Input Area (Mock Message Input) */}
+        <div className="absolute bottom-0 w-full bg-[#17212b] border-t border-black/20 p-3 flex gap-2 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.2)]">
+          <button className="p-2 text-[#8a9aa9] hover:text-white transition-colors">
+            <MessageSquare className="w-6 h-6" />
+          </button>
+          <input
+            type="text"
+            placeholder="/avatar [имя]"
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && inputVal.trim()) {
+                setName(inputVal.replace('/avatar', '').trim() || 'ignat.ton');
+                setInputVal('');
+              }
+            }}
+            className="flex-1 bg-[#242f3d] text-[#f5f5f5] rounded-full px-4 py-2 text-[15px] focus:outline-none focus:ring-1 focus:ring-[#2b5278] placeholder-[#8a9aa9]"
+          />
+          <button 
+            onClick={() => {
+              if (inputVal.trim()) {
+                setName(inputVal.replace('/avatar', '').trim() || 'ignat.ton');
+                setInputVal('');
+              }
+            }}
+            className="p-2 text-[#38bdf8] hover:text-[#7dd3fc] transition-colors"
+          >
+            <Send className="w-6 h-6 ml-1" />
+          </button>
+        </div>
+
+      </div>
+
+      {/* Intro text on desktop side */}
+      <div className="hidden lg:flex flex-col ml-12 max-w-sm">
+        <h2 className="text-4xl font-bold mb-4 bg-gradient-to-r from-[#38bdf8] to-[#818cf8] bg-clip-text text-transparent">
+          New Avatar UI
+        </h2>
+        <p className="text-[#8a9aa9] text-lg leading-relaxed mb-6">
+          Минималистичный дизайн, плавные градиенты, эффекты стекла и идеальная типографика. 
+        </p>
+        <div className="space-y-4">
+          <div className="bg-[#17212b] p-4 rounded-xl border border-white/5">
+            <h3 className="font-semibold text-white mb-2 flex items-center gap-2">
+              <span className="text-[#38bdf8]">✦</span> Код для Node.js Canvas
+            </h3>
+            <p className="text-sm text-[#8a9aa9]">
+              Я подготовил функцию <code>drawAvatar</code>, которая использует стандартный API Canvas. Её можно скопировать прямо в бота!
+            </p>
+          </div>
+          <div className="bg-[#17212b] p-4 rounded-xl border border-white/5">
+            <h3 className="font-semibold text-white mb-2 flex items-center gap-2">
+              <span className="text-[#a78bfa]">✦</span> Инлайн-кнопки
+            </h3>
+            <p className="text-sm text-[#8a9aa9]">
+              Такой вид кнопок можно легко воссоздать в Telegram, используя <code>inline_keyboard</code> с эмодзи.
+            </p>
+          </div>
         </div>
       </div>
+
     </div>
   );
 }
-
-export default App;
