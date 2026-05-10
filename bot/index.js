@@ -1,327 +1,128 @@
-// ---------------------------------------------------------
-// 🛠 ИСПРАВЛЕННЫЙ bot/index.js 
-// Замените ваш bot/index.js на этот код для решения 
-// проблемы с черными аватарками и неработающими кнопками.
-// ---------------------------------------------------------
-require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
-const { createCanvas } = require('canvas');
+require('dotenv').config({ path: '../.env' }); // try to read from root if exists
+const TelegramBot = require('node-telegram-bot-api');
+const { generateAvatarBuffer, themes } = require('./generate');
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-if (!BOT_TOKEN) {
-  console.error('❌ BOT_TOKEN не задан!');
+const token = process.env.BOT_TOKEN;
+
+if (!token) {
+  console.error("BOT_TOKEN is not defined in environment variables.");
   process.exit(1);
 }
-const bot = new Telegraf(BOT_TOKEN);
 
-const SIZE = 1024;
-const themes = [
-  { id: 'ton-blue', name: '💎 TON Blue', bg1: '#3b82f6', bg2: '#4f46e5', textColor: '#ffffff', glassColor: 'rgba(255,255,255,0.12)' },
-  { id: 'dark-mesh', name: '🌑 Dark Mesh', bg1: '#0f172a', bg2: '#27272a', textColor: '#ffffff', glassColor: 'rgba(255,255,255,0.06)' },
-  { id: 'neon-cyber', name: '💜 Neon Cyber', bg1: '#c026d3', bg2: '#4c1d95', textColor: '#fdf4ff', glassColor: 'rgba(192,38,211,0.12)' },
-  { id: 'holographic', name: '🌈 Holographic', bg1: '#f9a8d4', bg2: '#818cf8', textColor: '#1e1b4b', glassColor: 'rgba(255,255,255,0.35)' },
-  { id: 'deep-space', name: '🚀 Deep Space', bg1: '#020617', bg2: '#1e1b4b', textColor: '#f3e8ff', glassColor: 'rgba(88,28,135,0.22)' },
-  { id: 'minimal-light', name: '⬜ Minimal Light', bg1: '#f4f4f5', bg2: '#d4d4d8', textColor: '#18181b', glassColor: 'rgba(255,255,255,0.65)' },
-  { id: 'matrix-web3', name: '🟢 Matrix Web3', bg1: '#022c22', bg2: '#064e3b', textColor: '#34d399', glassColor: 'rgba(6,78,59,0.22)' },
-  { id: 'molten-gold', name: '🥇 Molten Gold', bg1: '#f59e0b', bg2: '#ea580c', textColor: '#451a03', glassColor: 'rgba(255,255,255,0.22)' },
-];
+const bot = new TelegramBot(token, { polling: true });
 
-const getTheme = (id) => themes.find((t) => t.id === id) || themes[0];
-const randomTheme = () => themes[Math.floor(Math.random() * themes.length)];
+// We store user states to remember their current settings
+// user_id -> { domain, theme, glass, logo }
+const userStates = {};
 
-function drawTonLogo(ctx, cx, cy, r, color) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = r * 0.12;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.stroke();
-
-  const hw = r * 0.55;
-  const topY = cy - r * 0.35;
-  const botY = cy + r * 0.48;
-  const midY = cy + r * 0.10;
-
-  ctx.beginPath();
-  ctx.moveTo(cx - hw, topY);
-  ctx.lineTo(cx + hw, topY);
-  ctx.lineTo(cx, botY);
-  ctx.closePath();
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(cx, topY);
-  ctx.lineTo(cx, midY);
-  ctx.stroke();
-  ctx.restore();
+function getUserState(chatId) {
+  if (!userStates[chatId]) {
+    userStates[chatId] = {
+      domain: '7288.ton',
+      theme: 0,
+      glass: true,
+      logo: true,
+      messageId: null // to track which message has the inline keyboard
+    };
+  }
+  return userStates[chatId];
 }
 
-function generateAvatar({ name = 'my.ton', themeId = 'ton-blue', glassmorphism = true, showLogo = true, rounded = 'circle' } = {}) {
-  const theme = getTheme(themeId);
-  const canvas = createCanvas(SIZE, SIZE);
-  const ctx = canvas.getContext('2d');
+function getKeyboard(state) {
+  return {
+    inline_keyboard: [
+      [
+        { text: `🎨 Theme: ${themes[state.theme].name}`, callback_data: 'next_theme' },
+        { text: '🎲 Random', callback_data: 'random_theme' }
+      ],
+      [
+        { text: `🔳 Glass: ${state.glass ? 'ON' : 'OFF'}`, callback_data: 'toggle_glass' },
+        { text: `💎 Logo: ${state.logo ? 'ON' : 'OFF'}`, callback_data: 'toggle_logo' }
+      ],
+      [
+        { text: '🔄 Regenerate', callback_data: 'regenerate' }
+      ]
+    ]
+  };
+}
 
-  // ✅ ИСПРАВЛЕНИЕ 1: Заливка белым фоном, чтобы избежать черных артефактов в Telegram
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, SIZE, SIZE);
-
-  const grad = ctx.createLinearGradient(0, 0, SIZE, SIZE);
-  grad.addColorStop(0, theme.bg1);
-  grad.addColorStop(1, theme.bg2);
-
-  const br = rounded === 'circle' ? SIZE / 2 : rounded === 'rounded' ? SIZE * 0.18 : 0;
-  ctx.beginPath();
-  if (br > 0) {
-    if (ctx.roundRect) ctx.roundRect(0, 0, SIZE, SIZE, br);
-    else ctx.arc(SIZE/2, SIZE/2, SIZE/2, 0, Math.PI * 2);
-  } else {
-    ctx.rect(0, 0, SIZE, SIZE);
+// Generate and send/edit avatar
+async function sendAvatar(chatId, state, action = 'send') {
+  try {
+    const buffer = generateAvatarBuffer(state.domain, state.theme, state.glass, state.logo);
+    
+    if (action === 'send') {
+      const msg = await bot.sendPhoto(chatId, buffer, {
+        caption: `💎 Avatar for **${state.domain}**\n\nUse inline buttons to customize.`,
+        parse_mode: 'Markdown',
+        reply_markup: getKeyboard(state)
+      });
+      state.messageId = msg.message_id;
+    } else if (action === 'edit' && state.messageId) {
+      // Sometimes editMessageMedia with buffers is tricky in node-telegram-bot-api.
+      // Easiest reliable way: delete old and send new.
+      try {
+        await bot.deleteMessage(chatId, state.messageId);
+      } catch (e) {
+        // ignore if can't delete
+      }
+      
+      const msg = await bot.sendPhoto(chatId, buffer, {
+        caption: `💎 Avatar for **${state.domain}**\n\nUse inline buttons to customize.`,
+        parse_mode: 'Markdown',
+        reply_markup: getKeyboard(state)
+      });
+      state.messageId = msg.message_id;
+    }
+  } catch (error) {
+    console.error("Error sending avatar:", error);
+    bot.sendMessage(chatId, "❌ Error generating avatar.");
   }
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
+}
 
-  // ✅ ИСПРАВЛЕНИЕ 2: Правильный clip() с активным путем
-  ctx.save();
-  ctx.beginPath();
-  if (br > 0 && ctx.roundRect) ctx.roundRect(0, 0, SIZE, SIZE, br);
-  else ctx.rect(0, 0, SIZE, SIZE);
-  ctx.clip();
+// Commands
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, `💎 *Welcome to TON Avatar Bot!*\n\nUse /avatar <domain> to generate an avatar.\nIf you don't specify a domain, we will generate one for *7288.ton*.\n\nExample:\n\`/avatar myname.ton\``, { parse_mode: 'Markdown' });
+});
+
+bot.onText(/\/avatar(?:\s+(.+))?/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const domain = match[1] || '7288.ton';
   
-  const glowGrad1 = ctx.createRadialGradient(SIZE * 0.8, SIZE * 0.1, 0, SIZE * 0.8, SIZE * 0.1, SIZE * 0.5);
-  glowGrad1.addColorStop(0, 'rgba(255,255,255,0.15)');
-  glowGrad1.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = glowGrad1;
-  ctx.fillRect(0, 0, SIZE, SIZE);
+  const state = getUserState(chatId);
+  state.domain = domain;
+  
+  // We send a new one
+  sendAvatar(chatId, state, 'send');
+});
 
-  const glowGrad2 = ctx.createRadialGradient(SIZE * 0.1, SIZE * 0.9, 0, SIZE * 0.1, SIZE * 0.9, SIZE * 0.6);
-  glowGrad2.addColorStop(0, 'rgba(0,0,0,0.18)');
-  glowGrad2.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = glowGrad2;
-  ctx.fillRect(0, 0, SIZE, SIZE);
-  ctx.restore();
+// Inline callbacks
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+  const state = getUserState(chatId);
 
-  const cardSize = SIZE * 0.6;
-  const cardX = (SIZE - cardSize) / 2;
-  const cardY = (SIZE - cardSize) / 2;
-  const cardR = SIZE * 0.08;
+  // If callback is from an older message, we still update the state but edit that specific message.
+  state.messageId = query.message.message_id;
 
-  if (glassmorphism) {
-    ctx.save();
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(cardX, cardY, cardSize, cardSize, cardR);
-    else ctx.rect(cardX, cardY, cardSize, cardSize);
-    ctx.fillStyle = theme.glassColor;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.restore();
+  if (data === 'next_theme') {
+    state.theme = (state.theme + 1) % themes.length;
+  } else if (data === 'random_theme') {
+    state.theme = Math.floor(Math.random() * themes.length);
+  } else if (data === 'toggle_glass') {
+    state.glass = !state.glass;
+  } else if (data === 'toggle_logo') {
+    state.logo = !state.logo;
+  } else if (data === 'regenerate') {
+    // Just re-draw with current settings
   }
 
-  if (showLogo) {
-    const logoCX = SIZE / 2;
-    const logoCY = cardY + cardSize * 0.22;
-    const logoR = cardSize * 0.13;
-    drawTonLogo(ctx, logoCX, logoCY, logoR, theme.textColor);
-  }
+  // Acknowledge callback
+  bot.answerCallbackQuery(query.id);
 
-  const initials = name.replace(/\.ton$/i, '').substring(0, 2).toUpperCase() || 'TN';
-  const fontSize = initials.length > 1 ? SIZE * 0.26 : SIZE * 0.32;
-  ctx.font = `bold ${fontSize}px "DejaVu Sans", Arial, sans-serif`;
-  ctx.fillStyle = theme.textColor;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0,0,0,0.25)';
-  ctx.shadowBlur = 24;
-  ctx.shadowOffsetY = 8;
-  ctx.fillText(initials, SIZE / 2, SIZE / 2 + SIZE * 0.02);
-  ctx.shadowColor = 'transparent';
-  ctx.shadowBlur = 0;
-  ctx.shadowOffsetY = 0;
-
-  const displayName = name || 'TON Domain';
-  const nameFontSize = SIZE * 0.048;
-  ctx.font = `600 ${nameFontSize}px "DejaVu Sans", Arial, sans-serif`;
-  ctx.fillStyle = theme.textColor;
-  ctx.globalAlpha = 0.8;
-  ctx.fillText(displayName.toUpperCase(), SIZE / 2, cardY + cardSize - SIZE * 0.065);
-  ctx.globalAlpha = 1;
-
-  // ✅ ИСПРАВЛЕНИЕ 3: JPEG формат для обхода бага Telegram с прозрачным PNG
-  return canvas.toBuffer('image/jpeg', { quality: 0.95 });
-}
-
-const userState = new Map();
-function getUserState(userId) {
-  if (!userState.has(userId)) {
-    userState.set(userId, { themeId: 'ton-blue', name: 'my.ton', glassmorphism: true, showLogo: true, rounded: 'circle' });
-  }
-  return userState.get(userId);
-}
-
-// ✅ ИСПРАВЛЕНИЕ 4: Добавлена функция отправки аватара, которой не было в коде
-async function sendAvatar(ctx, state) {
-  try {
-    const buffer = generateAvatar(state);
-    await ctx.replyWithPhoto({ source: buffer }, { caption: `✅ Ваш аватар готов!` });
-  } catch (err) {
-    console.error(err);
-    await ctx.reply('❌ Ошибка при генерации аватара.');
-  }
-}
-
-function mainKeyboard() {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback('🎨 Создать аватар', 'gen_avatar'), Markup.button.callback('🎲 Случайный', 'gen_random')],
-    [Markup.button.callback('🖼 Выбрать тему', 'show_themes'), Markup.button.callback('⚙️ Настройки', 'show_settings')],
-    [Markup.button.callback('❓ Помощь', 'show_help')],
-  ]);
-}
-
-// ✅ ИСПРАВЛЕНИЕ 5: Корректный возврат инлайн клавиатуры
-function themesKeyboard() {
-  const rows = [];
-  for (let i = 0; i < themes.length; i += 2) {
-    const row = [Markup.button.callback(themes[i].name, `theme_${themes[i].id}`)];
-    if (themes[i + 1]) row.push(Markup.button.callback(themes[i + 1].name, `theme_${themes[i + 1].id}`));
-    rows.push(row);
-  }
-  return Markup.inlineKeyboard(rows); 
-}
-
-// ✅ ИСПРАВЛЕНИЕ 6: Добавлена отсутствующая функция клавиатуры настроек!
-function settingsKeyboard(state) {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback(`Glassmorphism: ${state.glassmorphism ? 'ВКЛ ✅' : 'ВЫКЛ ❌'}`, 'toggle_glass')],
-    [Markup.button.callback(`Логотип: ${state.showLogo ? 'ВКЛ ✅' : 'ВЫКЛ ❌'}`, 'toggle_logo')],
-    [Markup.button.callback(`Форма: ${state.rounded === 'circle' ? 'Круг ⭕' : state.rounded === 'rounded' ? 'Скругленный 🔲' : 'Квадрат ⬛'}`, 'toggle_rounded')],
-    [Markup.button.callback('« Назад', 'back_main')]
-  ]);
-}
-
-bot.start(async (ctx) => {
-  await ctx.replyWithHTML(
-    `👋 Привет, ${ctx.from.first_name || 'друг'}! \n\n` +
-    `Я TON Avatar Bot — генерирую красивые аватары.\n\n` +
-    `Выбери действие ниже 👇`,
-    mainKeyboard()
-  );
+  // Edit message with new image
+  await sendAvatar(chatId, state, 'edit');
 });
 
-bot.help(async (ctx) => {
-  await ctx.replyWithHTML(
-    `❓ Помощь — TON Avatar Bot\n\n` +
-    `Просто напиши любое слово или домен .ton в чат, и я запомню его как твоё имя.\n`,
-    Markup.inlineKeyboard([[Markup.button.callback('🏠 Главное меню', 'back_main')]])
-  );
-});
-
-bot.command('avatar', async (ctx) => {
-  const state = getUserState(ctx.from.id);
-  const parts = ctx.message.text.split(' ');
-  if (parts[1]) state.name = parts.slice(1).join(' ').substring(0, 20);
-  await sendAvatar(ctx, state);
-});
-
-bot.command('random', async (ctx) => {
-  const state = getUserState(ctx.from.id);
-  state.themeId = randomTheme().id;
-  await sendAvatar(ctx, state);
-});
-
-bot.command('themes', async (ctx) => {
-  await ctx.reply('🖼 *Выбери тему для аватара:*', { parse_mode: 'Markdown', ...themesKeyboard() });
-});
-
-bot.command('settings', async (ctx) => {
-  const state = getUserState(ctx.from.id);
-  await ctx.reply('⚙️ *Настройки аватара:*', { parse_mode: 'Markdown', ...settingsKeyboard(state) });
-});
-
-bot.action('gen_avatar', async (ctx) => {
-  await ctx.answerCbQuery('⏳ Генерирую...');
-  await sendAvatar(ctx, getUserState(ctx.from.id));
-});
-
-bot.action('gen_random', async (ctx) => {
-  await ctx.answerCbQuery('🎲 Случайная тема!');
-  const state = getUserState(ctx.from.id);
-  state.themeId = randomTheme().id;
-  await sendAvatar(ctx, state);
-});
-
-bot.action('show_themes', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.editMessageText('🖼 *Выбери тему для аватара:*\n\nПосле выбора темы нажми «Создать аватар».', { parse_mode: 'Markdown', ...themesKeyboard() });
-});
-
-bot.action('show_settings', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.editMessageText('⚙️ *Настройки аватара:*', { parse_mode: 'Markdown', ...settingsKeyboard(getUserState(ctx.from.id)) });
-});
-
-bot.action('show_help', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.editMessageText('❓ *Помощь*\n\nПросто напиши имя или домен.ton в чат', { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('« Назад', 'back_main')]]) });
-});
-
-bot.action('back_main', async (ctx) => {
-  await ctx.answerCbQuery();
-  try {
-    await ctx.editMessageText('🏠 *Главное меню*\n\nВыбери действие:', { parse_mode: 'Markdown', ...mainKeyboard() });
-  } catch (_) {
-    await ctx.reply('🏠 Главное меню\n\nВыбери действие:', mainKeyboard());
-  }
-});
-
-themes.forEach((theme) => {
-  bot.action(`theme_${theme.id}`, async (ctx) => {
-    await ctx.answerCbQuery(`${theme.name} выбрана!`);
-    const state = getUserState(ctx.from.id);
-    state.themeId = theme.id;
-    await ctx.editMessageText(`✅ Тема *${theme.name}* выбрана!\n\nТеперь нажми «Создать аватар» 👇`, {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([[Markup.button.callback('🎨 Создать аватар', 'gen_avatar')], [Markup.button.callback('🔄 Другая тема', 'show_themes'), Markup.button.callback('🏠 Меню', 'back_main')]])
-    });
-  });
-});
-
-bot.action('toggle_glass', async (ctx) => {
-  await ctx.answerCbQuery();
-  const state = getUserState(ctx.from.id);
-  state.glassmorphism = !state.glassmorphism;
-  await ctx.editMessageText('⚙️ *Настройки аватара:*', { parse_mode: 'Markdown', ...settingsKeyboard(state) });
-});
-
-bot.action('toggle_logo', async (ctx) => {
-  await ctx.answerCbQuery();
-  const state = getUserState(ctx.from.id);
-  state.showLogo = !state.showLogo;
-  await ctx.editMessageText('⚙️ *Настройки аватара:*', { parse_mode: 'Markdown', ...settingsKeyboard(state) });
-});
-
-bot.action('toggle_rounded', async (ctx) => {
-  await ctx.answerCbQuery();
-  const state = getUserState(ctx.from.id);
-  state.rounded = state.rounded === 'circle' ? 'rounded' : state.rounded === 'rounded' ? 'square' : 'circle';
-  await ctx.editMessageText('⚙️ *Настройки аватара:*', { parse_mode: 'Markdown', ...settingsKeyboard(state) });
-});
-
-bot.on('text', async (ctx) => {
-  const text = ctx.message.text.trim();
-  if (text.startsWith('/')) return;
-  const state = getUserState(ctx.from.id);
-  state.name = text.substring(0, 20);
-  await ctx.reply(`✅ Имя обновлено: *${state.name}*\n\nГенерировать аватар?`, {
-    parse_mode: 'Markdown',
-    ...Markup.inlineKeyboard([[Markup.button.callback('🎨 Создать аватар', 'gen_avatar'), Markup.button.callback('🎲 Случайный', 'gen_random')], [Markup.button.callback('🏠 Меню', 'back_main')]])
-  });
-});
-
-bot.launch(() => console.log('✅ TON Avatar Bot запущен!'));
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+console.log("🤖 TON Avatar Bot is running...");
