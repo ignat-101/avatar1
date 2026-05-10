@@ -1,18 +1,17 @@
-require('dotenv').config({ path: '../.env' }); // try to read from root if exists
+require('dotenv').config(); // ✅ FIX 3: reads .env from CWD (the bot/ folder)
+
 const TelegramBot = require('node-telegram-bot-api');
 const { generateAvatarBuffer, themes } = require('./generate');
 
 const token = process.env.BOT_TOKEN;
-
 if (!token) {
-  console.error("BOT_TOKEN is not defined in environment variables.");
+  console.error('❌ BOT_TOKEN is not defined. Create bot/.env with BOT_TOKEN=...');
   process.exit(1);
 }
 
 const bot = new TelegramBot(token, { polling: true });
 
-// We store user states to remember their current settings
-// user_id -> { domain, theme, glass, logo }
+// Per-user state: domain, theme, glass, logo, messageId
 const userStates = {};
 
 function getUserState(chatId) {
@@ -22,7 +21,7 @@ function getUserState(chatId) {
       theme: 0,
       glass: true,
       logo: true,
-      messageId: null // to track which message has the inline keyboard
+      messageId: null,
     };
   }
   return userStates[chatId];
@@ -33,100 +32,105 @@ function getKeyboard(state) {
     inline_keyboard: [
       [
         { text: `🎨 Theme: ${themes[state.theme].name}`, callback_data: 'next_theme' },
-        { text: '🎲 Random', callback_data: 'random_theme' }
+        { text: '🎲 Random',                              callback_data: 'random_theme' },
       ],
       [
         { text: `🔳 Glass: ${state.glass ? 'ON' : 'OFF'}`, callback_data: 'toggle_glass' },
-        { text: `💎 Logo: ${state.logo ? 'ON' : 'OFF'}`, callback_data: 'toggle_logo' }
+        { text: `💎 Logo: ${state.logo  ? 'ON' : 'OFF'}`, callback_data: 'toggle_logo'  },
       ],
       [
-        { text: '🔄 Regenerate', callback_data: 'regenerate' }
-      ]
-    ]
+        { text: '🔄 Regenerate', callback_data: 'regenerate' },
+      ],
+    ],
   };
 }
 
-// Generate and send/edit avatar
 async function sendAvatar(chatId, state, action = 'send') {
   try {
+    // ✅ FIX 4: generate() now returns JPEG buffer — no black image issue
     const buffer = generateAvatarBuffer(state.domain, state.theme, state.glass, state.logo);
-    
+
+    const opts = {
+      caption:      `💎 Avatar for *${state.domain}*\n\nUse inline buttons to customize.`,
+      parse_mode:   'Markdown',
+      reply_markup: getKeyboard(state),
+    };
+
     if (action === 'send') {
-      const msg = await bot.sendPhoto(chatId, buffer, {
-        caption: `💎 Avatar for **${state.domain}**\n\nUse inline buttons to customize.`,
-        parse_mode: 'Markdown',
-        reply_markup: getKeyboard(state)
-      });
+      const msg = await bot.sendPhoto(chatId, buffer, opts);
       state.messageId = msg.message_id;
     } else if (action === 'edit' && state.messageId) {
-      // Sometimes editMessageMedia with buffers is tricky in node-telegram-bot-api.
-      // Easiest reliable way: delete old and send new.
-      try {
-        await bot.deleteMessage(chatId, state.messageId);
-      } catch (e) {
-        // ignore if can't delete
-      }
-      
-      const msg = await bot.sendPhoto(chatId, buffer, { 
-  caption: `💎 Avatar for **${state.domain}**`,
-  parse_mode: 'Markdown',
-  reply_markup: getKeyboard(state)
-}, {
-  // Add these file options!
-  filename: 'avatar.png',
-  contentType: 'image/png'
-});
+      // node-telegram-bot-api doesn't support editMessageMedia with buffers well,
+      // so delete + resend is the most reliable approach
+      try { await bot.deleteMessage(chatId, state.messageId); } catch (_) {}
+      const msg = await bot.sendPhoto(chatId, buffer, opts);
       state.messageId = msg.message_id;
     }
-  } catch (error) {
-    console.error("Error sending avatar:", error);
-    bot.sendMessage(chatId, "❌ Error generating avatar.");
+  } catch (err) {
+    console.error('Error in sendAvatar:', err);
+    bot.sendMessage(chatId, '❌ Error generating avatar. Check console.');
   }
 }
 
-// Commands
+// /start
 bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  bot.sendMessage(chatId, `💎 *Welcome to TON Avatar Bot!*\n\nUse /avatar <domain> to generate an avatar.\nIf you don't specify a domain, we will generate one for *7288.ton*.\n\nExample:\n\`/avatar myname.ton\``, { parse_mode: 'Markdown' });
+  bot.sendMessage(
+    msg.chat.id,
+    `💎 *Welcome to TON Avatar Bot!*
+
+Use /avatar to generate an avatar.
+Default domain: *7288.ton*
+
+Example:
+\`/avatar myname.ton\``,
+    { parse_mode: 'Markdown' }
+  );
 });
 
+// /avatar [domain]
 bot.onText(/\/avatar(?:\s+(.+))?/, (msg, match) => {
   const chatId = msg.chat.id;
-  const domain = match[1] || '7288.ton';
-  
-  const state = getUserState(chatId);
-  state.domain = domain;
-  
-  // We send a new one
+  const state  = getUserState(chatId);
+  state.domain = (match[1] || '7288.ton').trim();
   sendAvatar(chatId, state, 'send');
 });
 
-// Inline callbacks
+// Plain text → update domain on the fly
+bot.on('message', (msg) => {
+  if (msg.text && !msg.text.startsWith('/')) {
+    const chatId = msg.chat.id;
+    const state  = getUserState(chatId);
+    state.domain = msg.text.trim();
+    sendAvatar(chatId, state, 'send');
+  }
+});
+
+// Inline button callbacks
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
-  const data = query.data;
-  const state = getUserState(chatId);
-
-  // If callback is from an older message, we still update the state but edit that specific message.
+  const state  = getUserState(chatId);
   state.messageId = query.message.message_id;
 
-  if (data === 'next_theme') {
-    state.theme = (state.theme + 1) % themes.length;
-  } else if (data === 'random_theme') {
-    state.theme = Math.floor(Math.random() * themes.length);
-  } else if (data === 'toggle_glass') {
-    state.glass = !state.glass;
-  } else if (data === 'toggle_logo') {
-    state.logo = !state.logo;
-  } else if (data === 'regenerate') {
-    // Just re-draw with current settings
+  switch (query.data) {
+    case 'next_theme':
+      state.theme = (state.theme + 1) % themes.length;
+      break;
+    case 'random_theme':
+      state.theme = Math.floor(Math.random() * themes.length);
+      break;
+    case 'toggle_glass':
+      state.glass = !state.glass;
+      break;
+    case 'toggle_logo':
+      state.logo = !state.logo;
+      break;
+    case 'regenerate':
+      // keep settings, just redraw
+      break;
   }
 
-  // Acknowledge callback
-  bot.answerCallbackQuery(query.id);
-
-  // Edit message with new image
+  await bot.answerCallbackQuery(query.id);
   await sendAvatar(chatId, state, 'edit');
 });
 
-console.log("🤖 TON Avatar Bot is running...");
+console.log('🤖 TON Avatar Bot is running...');
