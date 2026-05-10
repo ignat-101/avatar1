@@ -67,11 +67,15 @@ async function sendAvatar(chatId, state, action = 'send') {
         // ignore if can't delete
       }
       
-      const msg = await bot.sendPhoto(chatId, buffer, {
-        caption: `💎 Avatar for **${state.domain}**\n\nUse inline buttons to customize.`,
-        parse_mode: 'Markdown',
-        reply_markup: getKeyboard(state)
-      });
+      const msg = await bot.sendPhoto(chatId, buffer, { 
+  caption: `💎 Avatar for **${state.domain}**`,
+  parse_mode: 'Markdown',
+  reply_markup: getKeyboard(state)
+}, {
+  // Add these file options!
+  filename: 'avatar.png',
+  contentType: 'image/png'
+});
       state.messageId = msg.message_id;
     }
   } catch (error) {
